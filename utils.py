@@ -1,118 +1,114 @@
-# utils.py - Helper utilities
-# Various helper functions for the student management system
+"""Helper utilities for the student management system."""
 import datetime
-import os
 
 
-# Format a student name for display
+TOTAL_CLASSES = 40
+GPA_DIVISOR = 25
+SCHOLARSHIP_MIN_AVERAGE = 85
+SCHOLARSHIP_MIN_ATTENDANCE = 35
+REPORT_WIDTH = 60
+
+
 def format_name(name):
-    parts = name.split(" ")
-    if len(parts) == 2:
-        return parts[1] + ", " + parts[0]
-    elif len(parts) == 3:
-        return parts[2] + ", " + parts[0] + " " + parts[1]
-    else:
-        return name
+    """Format a name as Last, First for display."""
+    return _format_name(name, uppercase_last_name=False)
 
 
-# Format a student name for reports (same logic, slightly different)
 def format_name_for_report(name):
-    parts = name.split(" ")
-    if len(parts) == 2:
-        return parts[1].upper() + ", " + parts[0]
-    elif len(parts) == 3:
-        return parts[2].upper() + ", " + parts[0] + " " + parts[1]
-    else:
-        return name
+    """Format a name as LAST, First for reports."""
+    return _format_name(name, uppercase_last_name=True)
 
 
-# Format a student name for emails
 def format_name_for_email(name):
-    parts = name.split(" ")
+    parts = name.split()
     if len(parts) >= 2:
-        return parts[0] + " " + parts[-1][0] + "."
+        return f"{parts[0]} {parts[-1][0]}."
     return name
 
 
+def _format_name(name, uppercase_last_name):
+    parts = name.split()
+    if len(parts) < 2:
+        return name
+
+    first_names = " ".join(parts[:-1])
+    last_name = parts[-1].upper() if uppercase_last_name else parts[-1]
+    return f"{last_name}, {first_names}"
+
+
 def validate_email(email):
-    # Check if email is valid
-    if email is None:
+    if not email or email.count("@") != 1:
         return False
-    if "@" not in email:
-        return False
-    if "." not in email:
-        return False
-    # Make sure there's something before and after @
-    parts = email.split("@")
-    if len(parts) != 2:
-        return False
-    if len(parts[0]) == 0:
-        return False
-    if len(parts[1]) == 0:
-        return False
-    return True
+
+    local_part, domain = email.split("@")
+    return bool(local_part and domain and "." in domain)
 
 
 def validate_phone(phone):
-    # Check if phone number is valid
     if phone is None:
         return False
-    digits = ""
-    for ch in phone:
-        if ch.isdigit():
-            digits += ch
-    if len(digits) < 10 or len(digits) > 15:
-        return False
-    return True
+
+    digits = "".join(character for character in phone if character.isdigit())
+    return 10 <= len(digits) <= 15
 
 
-# Calculate letter grade from numeric average
 def get_letter_grade(avg):
     if avg >= 90:
         return "A"
-    elif avg >= 80:
+    if avg >= 80:
         return "B"
-    elif avg >= 70:
+    if avg >= 70:
         return "C"
-    elif avg >= 60:
+    if avg >= 60:
         return "D"
-    else:
-        return "F"
+    return "F"
 
 
-# This function was used for the old reporting system
-# Keeping it in case we need it again
+def calculate_average(values):
+    return sum(values) / len(values) if values else 0
+
+
+def calculate_gpa(average):
+    return average / GPA_DIVISOR
+
+
+def calculate_attendance_rate(attendance_count):
+    return attendance_count / TOTAL_CLASSES * 100
+
+
 def generate_old_report(students, semester, year):
-    report = "SEMESTER REPORT\n"
-    report += "=" * 40 + "\n"
-    report += f"Semester: {semester} {year}\n"
-    report += f"Total Students: {len(students)}\n"
-    for s in students:
-        report += f"  {s.name}: {s.final_grade}\n"
-    return report
+    lines = [
+        "SEMESTER REPORT",
+        "=" * 40,
+        f"Semester: {semester} {year}",
+        f"Total Students: {len(students)}",
+        ]
+    lines.extend(f"  {student.name}: {student.final_grade}" for student in students)
+    return "\n".join(lines) + "\n"
 
 
-# Another old function
 def export_to_xml(students):
-    xml = '<?xml version="1.0"?>\n<students>\n'
-    for s in students:
-        xml += f'  <student id="{s.student_id}">\n'
-        xml += f'    <name>{s.name}</name>\n'
-        xml += f'  </student>\n'
-    xml += '</students>'
-    return xml
+    lines = ['<?xml version="1.0"?>', "<students>"]
+    for student in students:
+        lines.append(f'  <student id="{student.student_id}">')
+        lines.append(f"    <name>{student.name}</name>")
+        lines.append("  </student>")
+    lines.append("</students>")
+    return "\n".join(lines)
 
 
 def get_current_semester():
     month = datetime.datetime.now().month
-    if month >= 1 and month <= 5:
+    if 1 <= month <= 5:
         return "Spring"
-    elif month >= 6 and month <= 8:
+    if 6 <= month <= 8:
         return "Summer"
-    else:
-        return "Fall"
+    return "Fall"
+
+
+def current_timestamp():
+    return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
 def log_action(action, details):
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"[{timestamp}] {action}: {details}")
+    print(f"[{current_timestamp()}] {action}: {details}")

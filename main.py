@@ -57,56 +57,34 @@ def main():
     print("=" * 60)
     print()
 
-    # Initialize the manager
     manager = StudentManager()
 
-    # Load students
     students = create_sample_students()
-    for s in students:
-        manager.add_student(s)
+    for student in students:
+        manager.add_student(student)
 
     log_action("SYSTEM", f"Loaded {len(students)} students")
 
-    # Step 1: Process grades
     print(">>> Processing Grades...")
-    graded = manager.process_students(
-        mode="grade",
-        output_dir="./output",
+    graded = manager.process_grades(
         send_notifications=True,
-        notification_prefix="Dear",
-        min_attendance_pct=75,
-        include_warnings=True,
-        export_format="json"
+        notification_prefix="Dear"
     )
     print(f"    Processed {len(graded)} students for grading.\n")
 
-    # Step 2: Process attendance
     print(">>> Processing Attendance...")
-    attended = manager.process_students(
-        mode="attendance",
-        output_dir="./output",
-        send_notifications=True,
-        notification_prefix="Important:",
+    attended = manager.process_attendance(
         min_attendance_pct=75,
         include_warnings=True,
-        export_format="json"
+        send_notifications=True,
+        notification_prefix="Important:"
     )
     print(f"    Processed {len(attended)} students for attendance.\n")
 
-    # Step 3: Update statuses
     print(">>> Updating Student Statuses...")
-    manager.process_students(
-        mode="status",
-        output_dir="./output",
-        send_notifications=False,
-        notification_prefix="",
-        min_attendance_pct=75,
-        include_warnings=True,
-        export_format="json"
-    )
+    manager.update_statuses()
     print("    Statuses updated.\n")
 
-    # Step 4: Generate grade report
     print(">>> Generating Grade Report...")
     grade_report = manager.generate_report(
         students=manager.students,
@@ -119,7 +97,6 @@ def main():
     print(grade_report)
     print()
 
-    # Step 5: Generate attendance report
     print(">>> Generating Attendance Report...")
     attendance_report = manager.generate_report(
         students=manager.students,
@@ -132,7 +109,6 @@ def main():
     print(attendance_report)
     print()
 
-    # Step 6: Show statistics
     print(">>> Statistics Summary...")
     stats = manager.get_statistics(manager.students)
     print(f"    Total Students:        {stats['total']}")
@@ -145,11 +121,10 @@ def main():
     print(f"    Grade Distribution:    A={stats['grade_a']} B={stats['grade_b']} C={stats['grade_c']} D={stats['grade_d']} F={stats['grade_f']}")
     print()
 
-    # Step 7: Show notifications sent
     print(">>> Notifications Log...")
-    for n in manager.notification_log:
-        print(f"    [{n['sent_at']}] To: {n['to']} | Type: {n['type']}")
-        print(f"      Message: {n['message']}")
+    for notification in manager.notification_log:
+        print(f"    [{notification['sent_at']}] To: {notification['to']} | Type: {notification['type']}")
+        print(f"      Message: {notification['message']}")
     print()
 
     print("=" * 60)

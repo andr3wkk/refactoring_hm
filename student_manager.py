@@ -1,351 +1,348 @@
-# student_manager.py - Main business logic
-# This class handles everything related to student management
-# It processes grades, attendance, reports, and notifications
-import datetime
+"""Business logic for student grade management."""
 import json
 import os
 
-from utils import format_name, format_name_for_report, validate_email, log_action
+from utils import (
+    REPORT_WIDTH,
+    SCHOLARSHIP_MIN_ATTENDANCE,
+    SCHOLARSHIP_MIN_AVERAGE,
+    TOTAL_CLASSES,
+    calculate_attendance_rate,
+    calculate_average,
+    calculate_gpa,
+    current_timestamp,
+    format_name_for_report,
+    get_letter_grade,
+    log_action,
+    validate_email,
+)
 
 
 class StudentManager:
-    """The main class that manages all student operations.
-    Handles grading, attendance tracking, report generation,
-    notifications, data persistence, and statistics."""
+    """Manages student processing, reports, notifications, and statistics."""
 
     def __init__(self):
         self.students = []
         self.processed_count = 0
         self.error_log = []
         self.notification_log = []
-        self._cache = {}  # might be useful for performance later
 
     def add_student(self, student):
         self.students.append(student)
 
-    # This is the main processing method
-    def process_students(self, mode, output_dir, send_notifications,
-                         notification_prefix, min_attendance_pct,
-                         include_warnings, export_format):
+    def process_grades(self, send_notifications=False, notification_prefix="Dear"):
         results = []
-        # Process each student based on the mode
-        for s in self.students:
-            if mode == "grade":
-                # Calculate the average grade for the student
-                total = 0
-                count = 0
-                for g in s.grades:
-                    total = total + g
-                    count = count + 1
-                if count > 0:
-                    avg = total / count
-                else:
-                    avg = 0
+        for student in self.students:
+            average = calculate_average(student.grades)
+            student.final_grade = get_letter_grade(average)
+            student.gpa = calculate_gpa(average)
+            student.scholarship_eligible = self._is_scholarship_eligible(student, average)
 
-                # Determine the letter grade based on thresholds
-                if avg >= 90:
-                    letter = "A"
-                elif avg >= 80:
-                    letter = "B"
-                elif avg >= 70:
-                    letter = "C"
-                elif avg >= 60:
-                    letter = "D"
-                else:
-                    letter = "F"
+            if send_notifications:
+                message = (
+                    f"{notification_prefix} {student.name}, your grade is {student.final_grade} "
+                    f"(GPA: {round(student.gpa, 2)})"
+                )
+                self._send_notification(student, message, "grade")
 
-                s.final_grade = letter
-                s.gpa = avg / 25  # Convert to 4.0 scale
-
-                # Check scholarship eligibility
-                if avg >= 85 and s.attendance_count >= 35:
-                    s.scholarship_eligible = True
-
-                results.append(s)
-                self.processed_count += 1
-
-                # Send notification if enabled
-                if send_notifications:
-                    if validate_email(s.email):
-                        msg = notification_prefix + " " + s.name + ", your grade is " + letter
-                        msg += " (GPA: " + str(round(s.gpa, 2)) + ")"
-                        self.notification_log.append({
-                            "to": s.email,
-                            "message": msg,
-                            "sent_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                            "type": "grade"
-                        })
-                        log_action("NOTIFICATION", f"Grade notification sent to {s.email}")
-
-            elif mode == "attendance":
-                # Calculate attendance percentage
-                total_classes = 40  # total classes in semester
-                attended = s.attendance_count
-                rate = attended / total_classes * 100
-
-                if rate < min_attendance_pct:
-                    s.warning = True
-                    if include_warnings:
-                        s.notes.append("Low attendance warning: " + str(round(rate, 1)) + "%")
-
-                    # Send notification if enabled
-                    if send_notifications:
-                        if validate_email(s.email):
-                            msg = notification_prefix + " " + s.name + ", attendance warning: " + str(round(rate, 1)) + "%"
-                            self.notification_log.append({
-                                "to": s.email,
-                                "message": msg,
-                                "sent_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                "type": "attendance"
-                            })
-                            log_action("NOTIFICATION", f"Attendance warning sent to {s.email}")
-
-                results.append(s)
-                self.processed_count += 1
-
-            elif mode == "status":
-                # Update student status based on grades and attendance
-                if s.final_grade == "F":
-                    s.status = "probation"
-                elif s.warning:
-                    s.status = "warning"
-                else:
-                    s.status = "good_standing"
-                results.append(s)
-                self.processed_count += 1
-
+            results.append(student)
+            self._count_processed()
         return results
 
-    # Generate a report for the students
-    def generate_report(self, students, report_type, include_header,
-                        include_summary, sort_by, output_file):
-        lines = []
+    def process_attendance(
+            self,
+            min_attendance_pct=75,
+            include_warnings=True,
+            send_notifications=False,
+            notification_prefix="Important:",
+    ):
+        results = []
+        for student in self.students:
+            rate = calculate_attendance_rate(student.attendance_count)
 
-        if report_type == "grades":
-            if include_header:
-                lines.append("=" * 60)
-                lines.append("STUDENT GRADES REPORT")
-                lines.append("Generated: " + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-                lines.append("=" * 60)
-                lines.append("")
+            if rate < min_attendance_pct:
+                student.warning = True
+                if include_warnings:
+                    student.notes.append(f"Low attendance warning: {round(rate, 1)}%")
+                if send_notifications:
+                    message = f"{notification_prefix} {student.name}, attendance warning: {round(rate, 1)}%"
+                    self._send_notification(student, message, "attendance")
 
-            # Sort students
-            if sort_by == "name":
-                sorted_students = sorted(students, key=lambda x: x.name)
-            elif sort_by == "grade":
-                sorted_students = sorted(students, key=lambda x: x.gpa if x.gpa else 0, reverse=True)
-            elif sort_by == "id":
-                sorted_students = sorted(students, key=lambda x: x.student_id)
+            results.append(student)
+            self._count_processed()
+        return results
+
+    def update_statuses(self):
+        results = []
+        for student in self.students:
+            if student.final_grade == "F":
+                student.status = "probation"
+            elif student.warning:
+                student.status = "warning"
             else:
-                sorted_students = students
+                student.status = "good_standing"
 
-            for s in sorted_students:
-                formatted = format_name_for_report(s.name)
-                line = f"  {formatted:<30} | Grade: {s.final_grade or 'N/A':<3} | GPA: {s.gpa or 0:.2f}"
-                if s.scholarship_eligible:
-                    line += " | ★ SCHOLARSHIP"
-                lines.append(line)
+            results.append(student)
+            self._count_processed()
+        return results
 
-            if include_summary:
-                lines.append("")
-                lines.append("-" * 60)
-                # Calculate summary statistics
-                total_gpa = 0
-                count = 0
-                grade_counts = {"A": 0, "B": 0, "C": 0, "D": 0, "F": 0}
-                for s in students:
-                    if s.gpa is not None:
-                        total_gpa += s.gpa
-                        count += 1
-                    if s.final_grade in grade_counts:
-                        grade_counts[s.final_grade] += 1
+    def process_students(
+            self,
+            mode,
+            output_dir=None,
+            send_notifications=False,
+            notification_prefix="",
+            min_attendance_pct=75,
+            include_warnings=True,
+            export_format="json",
+    ):
+        """Backward-compatible wrapper for the original mode-based API."""
+        if mode == "grade":
+            return self.process_grades(send_notifications, notification_prefix)
+        if mode == "attendance":
+            return self.process_attendance(
+                min_attendance_pct,
+                include_warnings,
+                send_notifications,
+                notification_prefix,
+            )
+        if mode == "status":
+            return self.update_statuses()
+        return []
 
-                avg_gpa = total_gpa / count if count > 0 else 0
-                lines.append(f"  Total Students: {len(students)}")
-                lines.append(f"  Average GPA: {avg_gpa:.2f}")
-                lines.append(f"  Grade Distribution: A={grade_counts['A']}, B={grade_counts['B']}, C={grade_counts['C']}, D={grade_counts['D']}, F={grade_counts['F']}")
-                scholarship_count = sum(1 for s in students if s.scholarship_eligible)
-                lines.append(f"  Scholarship Eligible: {scholarship_count}")
-
-        elif report_type == "attendance":
-            if include_header:
-                lines.append("=" * 60)
-                lines.append("STUDENT ATTENDANCE REPORT")
-                lines.append("Generated: " + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-                lines.append("=" * 60)
-                lines.append("")
-
-            # Sort students
-            if sort_by == "name":
-                sorted_students = sorted(students, key=lambda x: x.name)
-            elif sort_by == "attendance":
-                sorted_students = sorted(students, key=lambda x: x.attendance_count, reverse=True)
-            elif sort_by == "id":
-                sorted_students = sorted(students, key=lambda x: x.student_id)
-            else:
-                sorted_students = students
-
-            for s in sorted_students:
-                formatted = format_name_for_report(s.name)
-                rate = s.attendance_count / 40 * 100
-                status_mark = "⚠️" if s.warning else "✓"
-                line = f"  {formatted:<30} | Attended: {s.attendance_count}/40 ({rate:.0f}%) {status_mark}"
-                lines.append(line)
-
-            if include_summary:
-                lines.append("")
-                lines.append("-" * 60)
-                total_att = 0
-                warning_count = 0
-                for s in students:
-                    total_att += s.attendance_count
-                    if s.warning:
-                        warning_count += 1
-                avg_att = total_att / len(students) if students else 0
-                lines.append(f"  Total Students: {len(students)}")
-                lines.append(f"  Average Attendance: {avg_att:.1f}/40 ({avg_att/40*100:.0f}%)")
-                lines.append(f"  Students with Warnings: {warning_count}")
-
-        elif report_type == "full":
-            if include_header:
-                lines.append("=" * 60)
-                lines.append("FULL STUDENT REPORT")
-                lines.append("Generated: " + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-                lines.append("=" * 60)
-                lines.append("")
-
-            for s in students:
-                formatted = format_name_for_report(s.name)
-                rate = s.attendance_count / 40 * 100
-                lines.append(f"  {formatted}")
-                lines.append(f"    ID: {s.student_id} | Year: {s.year} | Major: {s.major}")
-                lines.append(f"    Grade: {s.final_grade or 'N/A'} | GPA: {s.gpa or 0:.2f}")
-                lines.append(f"    Attendance: {s.attendance_count}/40 ({rate:.0f}%)")
-                lines.append(f"    Status: {s.status}")
-                if s.notes:
-                    lines.append(f"    Notes: {'; '.join(s.notes)}")
-                lines.append("")
-
+    def generate_report(
+            self,
+            students,
+            report_type,
+            include_header,
+            include_summary,
+            sort_by,
+            output_file,
+    ):
+        report_builders = {
+            "grades": self._build_grade_report,
+            "attendance": self._build_attendance_report,
+            "full": self._build_full_report,
+        }
+        builder = report_builders.get(report_type)
+        lines = builder(students, include_header, include_summary, sort_by) if builder else []
         report_text = "\n".join(lines)
 
         if output_file:
-            os.makedirs(os.path.dirname(output_file) if os.path.dirname(output_file) else ".", exist_ok=True)
-            with open(output_file, "w") as f:
-                f.write(report_text)
+            os.makedirs(os.path.dirname(output_file) or ".", exist_ok=True)
+            with open(output_file, "w") as file:
+                file.write(report_text)
             log_action("REPORT", f"Report saved to {output_file}")
 
         return report_text
 
     def export_data(self, students, fmt, filepath):
-        if fmt == "json":
-            data = []
-            for s in students:
-                d = {}
-                d["name"] = s.name
-                d["student_id"] = s.student_id
-                d["email"] = s.email
-                d["final_grade"] = s.final_grade
-                d["gpa"] = s.gpa
-                d["attendance_count"] = s.attendance_count
-                d["warning"] = s.warning
-                d["status"] = s.status
-                d["scholarship_eligible"] = s.scholarship_eligible
-                data.append(d)
-            result = json.dumps(data, indent=2)
-        elif fmt == "csv":
-            result = "name,student_id,email,final_grade,gpa,attendance,warning,status\n"
-            for s in students:
-                result += f"{s.name},{s.student_id},{s.email},{s.final_grade},{s.gpa},{s.attendance_count},{s.warning},{s.status}\n"
-        else:
-            result = ""
-            for s in students:
-                result += s.name + "|" + str(s.student_id) + "|" + str(s.final_grade) + "\n"
+        exporters = {
+            "json": self._export_json,
+            "csv": self._export_csv,
+        }
+        result = exporters.get(fmt, self._export_pipe)(students)
 
         if filepath:
-            with open(filepath, "w") as f:
-                f.write(result)
+            with open(filepath, "w") as file:
+                file.write(result)
         return result
 
-    # Get statistics about students
     def get_statistics(self, students):
         if not students:
             return {}
 
-        # Calculate GPA statistics
-        total_gpa = 0
-        gpas = []
-        for s in students:
-            if s.gpa is not None:
-                total_gpa += s.gpa
-                gpas.append(s.gpa)
-
-        avg_gpa = total_gpa / len(gpas) if gpas else 0
-
-        # Find highest and lowest GPA
-        highest_gpa = 0
-        lowest_gpa = 999
-        for g in gpas:
-            if g > highest_gpa:
-                highest_gpa = g
-            if g < lowest_gpa:
-                lowest_gpa = g
-
-        # Count grades
-        a_count = 0
-        b_count = 0
-        c_count = 0
-        d_count = 0
-        f_count = 0
-        for s in students:
-            if s.final_grade == "A":
-                a_count += 1
-            elif s.final_grade == "B":
-                b_count += 1
-            elif s.final_grade == "C":
-                c_count += 1
-            elif s.final_grade == "D":
-                d_count += 1
-            elif s.final_grade == "F":
-                f_count += 1
-
-        # Count attendance warnings
-        warning_count = 0
-        for s in students:
-            if s.warning:
-                warning_count += 1
-
-        # Count scholarship eligible
-        scholarship_count = 0
-        for s in students:
-            if s.scholarship_eligible:
-                scholarship_count += 1
+        gpas = [student.gpa for student in students if student.gpa is not None]
+        grade_counts = self._count_grades(students)
+        warning_count = sum(1 for student in students if student.warning)
+        scholarship_count = sum(1 for student in students if student.scholarship_eligible)
+        passing_count = sum(grade_counts[grade] for grade in ("A", "B", "C", "D"))
 
         return {
             "total": len(students),
-            "avg_gpa": round(avg_gpa, 2),
-            "highest_gpa": round(highest_gpa, 2),
-            "lowest_gpa": round(lowest_gpa, 2),
-            "grade_a": a_count,
-            "grade_b": b_count,
-            "grade_c": c_count,
-            "grade_d": d_count,
-            "grade_f": f_count,
+            "avg_gpa": round(calculate_average(gpas), 2),
+            "highest_gpa": round(max(gpas) if gpas else 0, 2),
+            "lowest_gpa": round(min(gpas) if gpas else 0, 2),
+            "grade_a": grade_counts["A"],
+            "grade_b": grade_counts["B"],
+            "grade_c": grade_counts["C"],
+            "grade_d": grade_counts["D"],
+            "grade_f": grade_counts["F"],
             "warnings": warning_count,
             "scholarship_eligible": scholarship_count,
-            "pass_rate": round((a_count + b_count + c_count + d_count) / len(students) * 100, 1)
+            "pass_rate": round(passing_count / len(students) * 100, 1),
         }
 
-    # Search for students - might need this later
     def search_students(self, query, field):
-        results = []
-        for s in self.students:
-            if field == "name":
-                if query.lower() in s.name.lower():
-                    results.append(s)
-            elif field == "major":
-                if query.lower() in s.major.lower():
-                    results.append(s)
-            elif field == "id":
-                if str(query) == str(s.student_id):
-                    results.append(s)
-        return results
+        query = str(query).lower()
+        search_fields = {
+            "name": lambda student: query in student.name.lower(),
+            "major": lambda student: query in student.major.lower(),
+            "id": lambda student: query == str(student.student_id),
+        }
+        matcher = search_fields.get(field)
+        return [student for student in self.students if matcher and matcher(student)]
+
+    def _build_grade_report(self, students, include_header, include_summary, sort_by):
+        lines = self._build_header("STUDENT GRADES REPORT") if include_header else []
+        for student in self._sort_students(students, sort_by):
+            line = (
+                f"  {format_name_for_report(student.name):<30} | "
+                f"Grade: {student.final_grade or 'N/A':<3} | GPA: {student.gpa or 0:.2f}"
+            )
+            if student.scholarship_eligible:
+                line += " | ★ SCHOLARSHIP"
+            lines.append(line)
+
+        if include_summary:
+            lines.extend(self._build_grade_summary(students))
+        return lines
+
+    def _build_attendance_report(self, students, include_header, include_summary, sort_by):
+        lines = self._build_header("STUDENT ATTENDANCE REPORT") if include_header else []
+        for student in self._sort_students(students, sort_by):
+            rate = calculate_attendance_rate(student.attendance_count)
+            status_mark = "⚠️" if student.warning else "✓"
+            lines.append(
+                f"  {format_name_for_report(student.name):<30} | "
+                f"Attended: {student.attendance_count}/{TOTAL_CLASSES} ({rate:.0f}%) {status_mark}"
+            )
+
+        if include_summary:
+            lines.extend(self._build_attendance_summary(students))
+        return lines
+
+    def _build_full_report(self, students, include_header, include_summary, sort_by):
+        lines = self._build_header("FULL STUDENT REPORT") if include_header else []
+        for student in self._sort_students(students, sort_by):
+            rate = calculate_attendance_rate(student.attendance_count)
+            lines.extend(
+                [
+                    f"  {format_name_for_report(student.name)}",
+                    f"    ID: {student.student_id} | Year: {student.year} | Major: {student.major}",
+                    f"    Grade: {student.final_grade or 'N/A'} | GPA: {student.gpa or 0:.2f}",
+                    f"    Attendance: {student.attendance_count}/{TOTAL_CLASSES} ({rate:.0f}%)",
+                    f"    Status: {student.status}",
+                ]
+            )
+            if student.notes:
+                lines.append(f"    Notes: {'; '.join(student.notes)}")
+            lines.append("")
+        return lines
+
+    def _build_header(self, title):
+        return [
+            "=" * REPORT_WIDTH,
+            title,
+            f"Generated: {current_timestamp()}",
+            "=" * REPORT_WIDTH,
+            "",
+            ]
+
+    def _build_grade_summary(self, students):
+        grade_counts = self._count_grades(students)
+        gpas = [student.gpa for student in students if student.gpa is not None]
+        scholarship_count = sum(1 for student in students if student.scholarship_eligible)
+
+        return [
+            "",
+            "-" * REPORT_WIDTH,
+            f"  Total Students: {len(students)}",
+            f"  Average GPA: {calculate_average(gpas):.2f}",
+            "  Grade Distribution: "
+            f"A={grade_counts['A']}, B={grade_counts['B']}, C={grade_counts['C']}, "
+            f"D={grade_counts['D']}, F={grade_counts['F']}",
+            f"  Scholarship Eligible: {scholarship_count}",
+            ]
+
+    def _build_attendance_summary(self, students):
+        attendance_counts = [student.attendance_count for student in students]
+        average_attendance = calculate_average(attendance_counts)
+        warning_count = sum(1 for student in students if student.warning)
+
+        return [
+            "",
+            "-" * REPORT_WIDTH,
+            f"  Total Students: {len(students)}",
+            f"  Average Attendance: {average_attendance:.1f}/{TOTAL_CLASSES} "
+            f"({calculate_attendance_rate(average_attendance):.0f}%)",
+            f"  Students with Warnings: {warning_count}",
+            ]
+
+    def _sort_students(self, students, sort_by):
+        sort_options = {
+            "name": lambda student: student.name,
+            "grade": lambda student: student.gpa if student.gpa else 0,
+            "attendance": lambda student: student.attendance_count,
+            "id": lambda student: student.student_id,
+        }
+        key = sort_options.get(sort_by)
+        reverse = sort_by in {"grade", "attendance"}
+        return sorted(students, key=key, reverse=reverse) if key else students
+
+    def _count_grades(self, students):
+        grade_counts = {"A": 0, "B": 0, "C": 0, "D": 0, "F": 0}
+        for student in students:
+            if student.final_grade in grade_counts:
+                grade_counts[student.final_grade] += 1
+        return grade_counts
+
+    def _is_scholarship_eligible(self, student, average):
+        return (
+                average >= SCHOLARSHIP_MIN_AVERAGE
+                and student.attendance_count >= SCHOLARSHIP_MIN_ATTENDANCE
+        )
+
+    def _send_notification(self, student, message, notification_type):
+        if not validate_email(student.email):
+            return
+
+        self.notification_log.append(
+            {
+                "to": student.email,
+                "message": message,
+                "sent_at": current_timestamp(),
+                "type": notification_type,
+            }
+        )
+
+        if notification_type == "attendance":
+            details = f"Attendance warning sent to {student.email}"
+        else:
+            details = f"{notification_type.title()} notification sent to {student.email}"
+        log_action("NOTIFICATION", details)
+
+    def _count_processed(self):
+        self.processed_count += 1
+
+    def _export_json(self, students):
+        data = [
+            {
+                "name": student.name,
+                "student_id": student.student_id,
+                "email": student.email,
+                "final_grade": student.final_grade,
+                "gpa": student.gpa,
+                "attendance_count": student.attendance_count,
+                "warning": student.warning,
+                "status": student.status,
+                "scholarship_eligible": student.scholarship_eligible,
+            }
+            for student in students
+        ]
+        return json.dumps(data, indent=2)
+
+    def _export_csv(self, students):
+        rows = ["name,student_id,email,final_grade,gpa,attendance,warning,status"]
+        rows.extend(
+            f"{student.name},{student.student_id},{student.email},{student.final_grade},"
+            f"{student.gpa},{student.attendance_count},{student.warning},{student.status}"
+            for student in students
+        )
+        return "\n".join(rows) + "\n"
+
+    def _export_pipe(self, students):
+        return "".join(
+            f"{student.name}|{student.student_id}|{student.final_grade}\n"
+            for student in students
+        )
