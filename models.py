@@ -1,5 +1,6 @@
+"""Student data model."""
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
@@ -23,10 +24,21 @@ class Student:
     notes: List[str] = field(default_factory=list)
     scholarship_eligible: bool = False
 
-    def to_string(self):
-        return self.name + " (" + str(self.student_id) + ")"
+    def __str__(self) -> str:
+        return self.to_string()
 
-    def to_dict(self):
+    def __eq__(self, other: Any) -> bool:
+        if not isinstance(other, Student):
+            return False
+        return self.student_id == other.student_id
+
+    def __hash__(self) -> int:
+        return hash(self.student_id)
+
+    def to_string(self) -> str:
+        return f"{self.name} ({self.student_id})"
+
+    def to_dict(self) -> Dict[str, Any]:
         return {
             "name": self.name,
             "student_id": self.student_id,
@@ -46,23 +58,21 @@ class Student:
             "status": self.status,
         }
 
-    def is_equal(self, other):
-        if other is None:
-            return False
-        return self.student_id == other.student_id
+    def is_equal(self, other: Any) -> bool:
+        return self == other
 
-    def get_full_info(self):
-        info = "Student: " + self.name + "\n"
-        info += "ID: " + str(self.student_id) + "\n"
-        info += "Email: " + self.email + "\n"
-        info += "Year: " + str(self.year) + "\n"
-        info += "Major: " + self.major + "\n"
-        info += "Phone: " + self.phone + "\n"
-        info += "Address: " + self.address + "\n"
-        info += "Emergency: " + self.emergency_contact + "\n"
+    def get_full_info(self) -> str:
+        info = f"Student: {self.name}\n"
+        info += f"ID: {self.student_id}\n"
+        info += f"Email: {self.email}\n"
+        info += f"Year: {self.year}\n"
+        info += f"Major: {self.major}\n"
+        info += f"Phone: {self.phone}\n"
+        info += f"Address: {self.address}\n"
+        info += f"Emergency: {self.emergency_contact}\n"
         return info
 
-    def calculate_credits(self):
+    def calculate_credits(self) -> int:
         credits_by_year = {
             1: 30,
             2: 60,

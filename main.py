@@ -6,12 +6,14 @@ A system for processing student grades, attendance, and generating reports.
 
 Run: python3 main.py
 """
+from typing import Dict, List
+
 from models import Student
 from student_manager import StudentManager
 from utils import get_current_semester, log_action
 
 
-def create_sample_students():
+def create_sample_students() -> List[Student]:
     """Create sample student data for demonstration."""
     students = [
         Student("Alice Johnson", 1001, "alice@university.edu",
@@ -50,25 +52,24 @@ def create_sample_students():
     return students
 
 
-def main():
+def print_header() -> None:
     print("=" * 60)
     print("  STUDENT GRADE MANAGEMENT SYSTEM")
     print(f"  Semester: {get_current_semester()} 2026")
     print("=" * 60)
     print()
 
-    manager = StudentManager()
 
-    students = create_sample_students()
+def add_students_to_manager(manager: StudentManager, students: List[Student]) -> None:
     for student in students:
         manager.add_student(student)
 
-    log_action("SYSTEM", f"Loaded {len(students)} students")
 
+def process_student_records(manager: StudentManager) -> None:
     print(">>> Processing Grades...")
     graded = manager.process_grades(
         send_notifications=True,
-        notification_prefix="Dear"
+        notification_prefix="Dear",
     )
     print(f"    Processed {len(graded)} students for grading.\n")
 
@@ -77,7 +78,7 @@ def main():
         min_attendance_pct=75,
         include_warnings=True,
         send_notifications=True,
-        notification_prefix="Important:"
+        notification_prefix="Important:",
     )
     print(f"    Processed {len(attended)} students for attendance.\n")
 
@@ -85,32 +86,32 @@ def main():
     manager.update_statuses()
     print("    Statuses updated.\n")
 
-    print(">>> Generating Grade Report...")
-    grade_report = manager.generate_report(
+
+def print_student_report(
+        manager: StudentManager,
+        report_type: str,
+        sort_by: str,
+) -> None:
+    report_titles = {
+        "grades": ">>> Generating Grade Report...",
+        "attendance": ">>> Generating Attendance Report...",
+    }
+
+    print(report_titles[report_type])
+    report = manager.generate_report(
         students=manager.students,
-        report_type="grades",
+        report_type=report_type,
         include_header=True,
         include_summary=True,
-        sort_by="grade",
-        output_file=None
+        sort_by=sort_by,
+        output_file=None,
     )
-    print(grade_report)
+    print(report)
     print()
 
-    print(">>> Generating Attendance Report...")
-    attendance_report = manager.generate_report(
-        students=manager.students,
-        report_type="attendance",
-        include_header=True,
-        include_summary=True,
-        sort_by="attendance",
-        output_file=None
-    )
-    print(attendance_report)
-    print()
 
+def print_statistics(stats: Dict) -> None:
     print(">>> Statistics Summary...")
-    stats = manager.get_statistics(manager.students)
     print(f"    Total Students:        {stats['total']}")
     print(f"    Average GPA:           {stats['avg_gpa']}")
     print(f"    Highest GPA:           {stats['highest_gpa']}")
@@ -118,19 +119,47 @@ def main():
     print(f"    Pass Rate:             {stats['pass_rate']}%")
     print(f"    Scholarship Eligible:  {stats['scholarship_eligible']}")
     print(f"    Attendance Warnings:   {stats['warnings']}")
-    print(f"    Grade Distribution:    A={stats['grade_a']} B={stats['grade_b']} C={stats['grade_c']} D={stats['grade_d']} F={stats['grade_f']}")
+    print(
+        "    Grade Distribution:    "
+        f"A={stats['grade_a']} B={stats['grade_b']} C={stats['grade_c']} "
+        f"D={stats['grade_d']} F={stats['grade_f']}"
+    )
     print()
 
+
+def print_notifications(manager: StudentManager) -> None:
     print(">>> Notifications Log...")
     for notification in manager.notification_log:
-        print(f"    [{notification['sent_at']}] To: {notification['to']} | Type: {notification['type']}")
+        print(
+            f"    [{notification['sent_at']}] To: {notification['to']} | "
+            f"Type: {notification['type']}"
+        )
         print(f"      Message: {notification['message']}")
     print()
 
+
+def print_completion(manager: StudentManager) -> None:
     print("=" * 60)
     print("  Processing Complete.")
     print(f"  Total operations: {manager.processed_count}")
     print("=" * 60)
+
+
+def main() -> None:
+    print_header()
+
+    manager = StudentManager()
+    students = create_sample_students()
+    add_students_to_manager(manager, students)
+
+    log_action("SYSTEM", f"Loaded {len(students)} students")
+
+    process_student_records(manager)
+    print_student_report(manager, report_type="grades", sort_by="grade")
+    print_student_report(manager, report_type="attendance", sort_by="attendance")
+    print_statistics(manager.get_statistics(manager.students))
+    print_notifications(manager)
+    print_completion(manager)
 
 
 if __name__ == "__main__":
